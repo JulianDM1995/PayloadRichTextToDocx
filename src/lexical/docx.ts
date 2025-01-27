@@ -1,17 +1,17 @@
-// src/lexical/docx/index.ts
-
 import {
   IS_BOLD,
   IS_ITALIC,
   IS_STRIKETHROUGH,
   IS_UNDERLINE,
+  IS_SUPERSCRIPT,
+  IS_SUBSCRIPT,
+  IS_HIGHLIGHT,
   SerializedEditorState,
 } from '@payloadcms/richtext-lexical/lexical'
 import { ImageRun, Paragraph, TextRun } from 'docx'
 
 export const lexicalToDocxParagraphs = async (
   data: SerializedEditorState,
-  prefixTextRun?: TextRun,
 ): Promise<Paragraph[]> => {
   if (!data || typeof data !== 'object' || !('root' in data)) {
     return []
@@ -22,47 +22,28 @@ export const lexicalToDocxParagraphs = async (
     return []
   }
 
-  let docxParagraphs: Paragraph[] = []
-  let isFirstParagraph = true // Para saber cuándo inyectar el prefijo
+  const docxParagraphs: Paragraph[] = []
 
-  // Utilizar for...of para iterar y esperar cada operación asíncrona
   for (const node of root.children) {
-    const paragraphsForNode = await convertNodeToDocx(
-      node,
-      isFirstParagraph ? prefixTextRun : undefined,
-    )
-    isFirstParagraph = false
+    const paragraphsForNode = await convertNodeToDocx(node)
     docxParagraphs.push(...paragraphsForNode)
-  }
-
-  // Si no se generó ni un solo párrafo y hay un prefijo, creamos uno
-  if (docxParagraphs.length === 0 && prefixTextRun) {
-    docxParagraphs = [
-      new Paragraph({
-        children: [prefixTextRun],
-      }),
-    ]
   }
 
   return docxParagraphs
 }
 
-const convertNodeToDocx = async (node: any, prefixTextRun?: TextRun): Promise<Paragraph[]> => {
+const convertNodeToDocx = async (node: any): Promise<Paragraph[]> => {
   switch (node.type) {
     case 'paragraph':
-      return [convertParagraphNode(node, prefixTextRun)]
+      return [convertParagraphNode(node)]
     case 'text':
-      // Texto "huérfano" => lo envolvemos en un párrafo
       return [
         new Paragraph({
-          children: prefixTextRun
-            ? [prefixTextRun, convertTextNode(node)]
-            : [convertTextNode(node)],
+          children: [convertTextNode(node)],
         }),
       ]
     case 'upload':
-      const imageUrl = `${process.env.NEXT_PUBLIC_SERVER_URL}${node.value.url}`
-      console.log('imageUrl', imageUrl)
+      const imageUrl = `${node.value.url}`
       const response = await fetch(imageUrl)
       const blob = await response.blob()
       const arrayBuffer = await blob.arrayBuffer()
@@ -77,40 +58,33 @@ const convertNodeToDocx = async (node: any, prefixTextRun?: TextRun): Promise<Pa
                 height: 100,
                 width: 100,
               },
-              type: 'jpeg', // Indicar el tipo correcto de imagen
-              fallback: uint8Array, // Proveer un fallback (aunque no se use para JPEG)
-            } as any), // Si aún hay conflictos de tipo, se puede usar un type cast puntual
+              type: 'jpeg',
+              fallback: uint8Array,
+            } as any),
           ],
         }),
       ]
-
     default:
-      // Nodo desconocido => placeholder
       return [
         new Paragraph({
           children: [
-            prefixTextRun,
             new TextRun({
-              text: `[Nodo Lexical desconocido: ${JSON.stringify(node)}]`,
+              text: `[Unknown Lexical node: ${JSON.stringify(node)}]`,
               bold: true,
             }),
-          ].filter((child): child is TextRun => child !== undefined), // para evitar null si prefixTextRun es undefined
+          ],
         }),
       ]
   }
 }
 
-const convertParagraphNode = (node: any, prefixTextRun?: TextRun): Paragraph => {
+const convertParagraphNode = (node: any): Paragraph => {
   const childRuns = (node.children || []).map((childNode: any) => {
     if (childNode.type === 'text') {
       return convertTextNode(childNode)
     }
     return new TextRun({ text: `[child.type=${childNode.type}]` })
   })
-
-  if (prefixTextRun) {
-    childRuns.unshift(prefixTextRun)
-  }
 
   return new Paragraph({
     children: childRuns,
@@ -122,6 +96,9 @@ const convertTextNode = (node: any): TextRun => {
   const isItalic = Boolean(node.format & IS_ITALIC)
   const isUnderline = Boolean(node.format & IS_UNDERLINE)
   const isStrikethrough = Boolean(node.format & IS_STRIKETHROUGH)
+  const isSuperscript = Boolean(node.format & IS_SUPERSCRIPT)
+  const isSubscript = Boolean(node.format & IS_SUBSCRIPT)
+  const isHighlight = Boolean(node.format & IS_HIGHLIGHT)
 
   return new TextRun({
     text: node.text || '',
@@ -129,5 +106,8 @@ const convertTextNode = (node: any): TextRun => {
     italics: isItalic,
     underline: isUnderline ? {} : undefined,
     strike: isStrikethrough,
+    superScript: isSuperscript ? true : undefined,
+    subScript: isSubscript ? true : undefined,
+    highlight: isHighlight ? 'yellow' : undefined,
   })
 }
